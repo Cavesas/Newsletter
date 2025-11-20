@@ -5,18 +5,18 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from openai import OpenAI
 
-# Load secrets from environment variables
+# Load secrets from environment
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Check API key early to avoid malformed header errors
+# Validate OpenAI key to prevent malformed header errors
 if not OPENAI_API_KEY or len(OPENAI_API_KEY) < 20:
     raise ValueError("❌ OpenAI API key is missing or invalid! Check GitHub Secrets.")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Multiple sources — US + EU
+# Multiple RSS feeds for US + EU cybersecurity sources
 RSS_FEEDS = [
     "https://news.google.com/rss/search?q=cybersecurity&hl=en-US&gl=US&ceid=US:en",
     "https://feeds.feedburner.com/TheHackersNews",
@@ -29,7 +29,7 @@ RSS_FEEDS = [
 ]
 
 def fetch_news():
-    """Fetch recent news from all RSS_FEEDS."""
+    """Fetch recent news articles from multiple RSS feeds."""
     news_list = []
     seen_titles = set()
     for feed in RSS_FEEDS:
@@ -50,8 +50,13 @@ def fetch_news():
     return news_list
 
 def summarize_with_llm(news_item):
-    """Use OpenAI to summarize each news headline."""
-    prompt = f"Summarize this cybersecurity headline in 2 sentences:\n\n'{news_item['title']}'\nLink: {news_item['link']}"
+    """Generate ~100-word summary via OpenAI GPT model."""
+    prompt = (
+        f"Write a factual and concise summary of about 100 words for this cybersecurity news:\n"
+        f"Title: {news_item['title']}\n"
+        f"Link: {news_item['link']}\n"
+        "The summary should be engaging, clear, and suitable for a professional newsletter."
+    )
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
@@ -60,31 +65,45 @@ def summarize_with_llm(news_item):
     return response.choices[0].message.content.strip()
 
 def create_report(news_list):
-    """Create formatted email report."""
+    """Create an HTML-formatted newsletter with clickable first word links."""
     if not news_list:
-        return "No cybersecurity news found this week."
-    report = f"📅 Weekly Cybersecurity Digest - {datetime.now().strftime('%Y-%m-%d')}\n\n"
+        return "<p>No cybersecurity news found this week.</p>"
+
+    report = f"<h2>📅 Weekly Cybersecurity Digest - {datetime.now().strftime('%Y-%m-%d')}</h2>"
     for item in news_list:
         summary = summarize_with_llm(item)
-        report += f"- **{item['title']}** ({item['published'].strftime('%Y-%m-%d')})\n  {summary}\n  {item['link']}\n\n"
+        summary_words = summary.split()
+        if summary_words:
+            first_word = summary_words[0]
+            rest_summary = " ".join(summary_words[1:])
+            first_word_link = f"<a href='{item['link']}' target='_blank'>{first_word}</a>"
+            html_summary = f"{first_word_link} {rest_summary}"
+        else:
+            html_summary = f"<a href='{item['link']}' target='_blank'>Read more</a>"
+
+        report += (
+            f"<p><strong>{item['title']}</strong> "
+            f"({item['published'].strftime('%Y-%m-%d')})<br>{html_summary}</p>"
+        )
     return report
 
-def send_email(subject, body):
-    """Send the digest via SendGrid."""
+def send_email(subject, body_html):
+    """Send HTML newsletter via SendGrid."""
     message = Mail(
-        from_email="info@krambi.lt",  # Must match verified sender in SendGrid
+        from_email="info@krambi.lt",  # Must match verified sender email in SendGrid
         to_emails=RECIPIENT_EMAIL,
         subject=subject,
-        plain_text_content=body
+        html_content=body_html
     )
     sg = SendGridAPIClient(SENDGRID_API_KEY)
     sg.send(message)
-    print("✅ Email sent via SendGrid")
+    print("✅ HTML Email sent via SendGrid")
 
 def job():
+    """Main job: fetch news, create digest, send email."""
     news = fetch_news()
-    review = create_report(news)
-    send_email("Weekly Cybersecurity News Digest", review)
+    review_html = create_report(news)
+    send_email("Weekly Cybersecurity News Digest", review_html)
 
 if __name__ == "__main__":
     job()
