@@ -1,22 +1,24 @@
 import feedparser
 import os
+import json
+from pathlib import Path
 from datetime import datetime, timedelta
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from openai import OpenAI
 
-# Load secrets from environment
+# Secrets from environment variables
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Validate OpenAI key to prevent malformed header errors
+# Validate API Key early
 if not OPENAI_API_KEY or len(OPENAI_API_KEY) < 20:
-    raise ValueError("❌ OpenAI API key is missing or invalid! Check GitHub Secrets.")
+    raise ValueError("❌ OpenAI API key missing or invalid. Check GitHub Secrets.")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Multiple RSS feeds for US + EU cybersecurity sources
+# RSS Feeds — US + EU cybersecurity sources
 RSS_FEEDS = [
     "https://news.google.com/rss/search?q=cybersecurity&hl=en-US&gl=US&ceid=US:en",
     "https://feeds.feedburner.com/TheHackersNews",
@@ -28,8 +30,20 @@ RSS_FEEDS = [
     "https://www.enisa.europa.eu/media/news/RSS"
 ]
 
+# History file
+HISTORY_FILE = Path("history.json")
+
+def load_history():
+    if HISTORY_FILE.exists():
+        with open(HISTORY_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_history(history):
+    with open(HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
+
 def fetch_news():
-    """Fetch recent news articles from multiple RSS feeds."""
     news_list = []
     seen_titles = set()
     for feed in RSS_FEEDS:
@@ -49,8 +63,22 @@ def fetch_news():
                     })
     return news_list
 
+def filter_duplicates(news_list):
+    history = load_history()
+    recent_articles = set()
+    recent_weeks = sorted(history.keys(), reverse=True)[:4]
+    for date in recent_weeks:
+        for item in history[date]:
+            recent_articles.add(item)
+
+    filtered = []
+    for n in news_list:
+        identifier = f"{n['title']}|{n['link']}"
+        if identifier not in recent_articles:
+            filtered.append(n)
+    return filtered
+
 def summarize_with_llm(news_item):
-    """Generate ~100-word summary via OpenAI GPT model."""
     prompt = (
         f"Write a factual and concise summary of about 100 words for this cybersecurity news:\n"
         f"Title: {news_item['title']}\n"
@@ -65,32 +93,23 @@ def summarize_with_llm(news_item):
     return response.choices[0].message.content.strip()
 
 def create_report(news_list):
-    """Create an HTML-formatted newsletter with clickable first word links."""
     if not news_list:
         return "<p>No cybersecurity news found this week.</p>"
 
     report = f"<h2>📅 Weekly Cybersecurity Digest - {datetime.now().strftime('%Y-%m-%d')}</h2>"
     for item in news_list:
         summary = summarize_with_llm(item)
-        summary_words = summary.split()
-        if summary_words:
-            first_word = summary_words[0]
-            rest_summary = " ".join(summary_words[1:])
-            first_word_link = f"<a href='{item['link']}' target='_blank'>{first_word}</a>"
-            html_summary = f"{first_word_link} {rest_summary}"
-        else:
-            html_summary = f"<a href='{item['link']}' target='_blank'>Read more</a>"
-
+        # Title is clickable link
+        title_link = f"<a href='{item['link']}' target='_blank'>{item['title']}</a>"
         report += (
-            f"<p><strong>{item['title']}</strong> "
-            f"({item['published'].strftime('%Y-%m-%d')})<br>{html_summary}</p>"
+            f"<p><strong>{title_link}</strong> "
+            f"({item['published'].strftime('%Y-%m-%d')})<br>{summary}</p>"
         )
     return report
 
 def send_email(subject, body_html):
-    """Send HTML newsletter via SendGrid."""
     message = Mail(
-        from_email="info@krambi.lt",  # Must match verified sender email in SendGrid
+        from_email="info@krambi.lt",
         to_emails=RECIPIENT_EMAIL,
         subject=subject,
         html_content=body_html
@@ -100,10 +119,16 @@ def send_email(subject, body_html):
     print("✅ HTML Email sent via SendGrid")
 
 def job():
-    """Main job: fetch news, create digest, send email."""
     news = fetch_news()
+    news = filter_duplicates(news)
     review_html = create_report(news)
     send_email("Weekly Cybersecurity News Digest", review_html)
+
+    # Update history
+    history = load_history()
+    week_key = datetime.now().strftime("%Y-%m-%d")
+    history[week_key] = [f"{n['title']}|{n['link']}" for n in news]
+    save_history(history)
 
 if __name__ == "__main__":
     job()
