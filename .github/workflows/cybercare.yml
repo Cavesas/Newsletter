@@ -18,13 +18,11 @@ jobs:
           python-version: '3.x'
 
       - name: Install dependencies
-        run: |
-          pip install feedparser openai
+        run: pip install feedparser openai sendgrid
 
       - name: Run bot
         env:
-          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: python cybercare_news_bot.py
