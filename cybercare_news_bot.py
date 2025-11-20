@@ -1,16 +1,14 @@
 import feedparser
-import smtplib
 import os
 from datetime import datetime, timedelta
-from email.mime.text import MIMEText
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 from openai import OpenAI
 
-EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS")
-EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 TOPIC = "Cybercare"
 RSS_FEEDS = [
@@ -32,7 +30,7 @@ def fetch_news():
     return news_list
 
 def summarize_with_llm(news_item):
-    prompt = f"Summarize in 2 sentences the following news headline: '{news_item['title']}' and its related topic Cybercare."
+    prompt = f"Summarize in 2 sentences the following news headline: '{news_item['title']}' on Cybercare."
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
@@ -42,7 +40,7 @@ def summarize_with_llm(news_item):
 
 def create_report(news_list):
     if not news_list:
-        return f"No Cybercare news found this week."
+        return "No Cybercare news found this week."
     report = f"📅 Weekly Cybercare Review - {datetime.now().strftime('%Y-%m-%d')}\n\n"
     for item in news_list:
         summary = summarize_with_llm(item)
@@ -50,13 +48,18 @@ def create_report(news_list):
     return report
 
 def send_email(subject, body):
-    msg = MIMEText(body, "plain")
-    msg["Subject"] = subject
-    msg["From"] = EMAIL_ADDRESS
-    msg["To"] = RECIPIENT_EMAIL
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-        server.send_message(msg)
+    message = Mail(
+        from_email="your_verified_sender@example.com",
+        to_emails=RECIPIENT_EMAIL,
+        subject=subject,
+        plain_text_content=body
+    )
+    try:
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        sg.send(message)
+        print("✅ Email sent via SendGrid")
+    except Exception as e:
+        print(f"❌ Error: {e}")
 
 def job():
     news = fetch_news()
