@@ -49,7 +49,7 @@ def create_report(news_list):
 
 def send_email(subject, body):
     message = Mail(
-        from_email="your_verified_sender@example.com",
+        from_email="info@krambi.lt",
         to_emails=RECIPIENT_EMAIL,
         subject=subject,
         plain_text_content=body
