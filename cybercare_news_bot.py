@@ -5,12 +5,18 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from openai import OpenAI
 
+# Load secrets from environment variables
 SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+# Check API key early to avoid malformed header errors
+if not OPENAI_API_KEY or len(OPENAI_API_KEY) < 20:
+    raise ValueError("❌ OpenAI API key is missing or invalid! Check GitHub Secrets.")
+
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+# Multiple sources — US + EU
 RSS_FEEDS = [
     "https://news.google.com/rss/search?q=cybersecurity&hl=en-US&gl=US&ceid=US:en",
     "https://feeds.feedburner.com/TheHackersNews",
@@ -23,6 +29,7 @@ RSS_FEEDS = [
 ]
 
 def fetch_news():
+    """Fetch recent news from all RSS_FEEDS."""
     news_list = []
     seen_titles = set()
     for feed in RSS_FEEDS:
@@ -43,7 +50,8 @@ def fetch_news():
     return news_list
 
 def summarize_with_llm(news_item):
-    prompt = f"Summarize in 2 sentences the following cybersecurity news headline: '{news_item['title']}'."
+    """Use OpenAI to summarize each news headline."""
+    prompt = f"Summarize this cybersecurity headline in 2 sentences:\n\n'{news_item['title']}'\nLink: {news_item['link']}"
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[{"role": "user", "content": prompt}],
@@ -52,6 +60,7 @@ def summarize_with_llm(news_item):
     return response.choices[0].message.content.strip()
 
 def create_report(news_list):
+    """Create formatted email report."""
     if not news_list:
         return "No cybersecurity news found this week."
     report = f"📅 Weekly Cybersecurity Digest - {datetime.now().strftime('%Y-%m-%d')}\n\n"
@@ -61,14 +70,16 @@ def create_report(news_list):
     return report
 
 def send_email(subject, body):
+    """Send the digest via SendGrid."""
     message = Mail(
-        from_email="info@krambi.lt",  # Verified SendGrid sender
+        from_email="info@krambi.lt",  # Must match verified sender in SendGrid
         to_emails=RECIPIENT_EMAIL,
         subject=subject,
         plain_text_content=body
     )
     sg = SendGridAPIClient(SENDGRID_API_KEY)
     sg.send(message)
+    print("✅ Email sent via SendGrid")
 
 def job():
     news = fetch_news()
